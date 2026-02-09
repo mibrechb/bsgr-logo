@@ -83,7 +83,22 @@
         background: #e5e7eb;
         margin: 14px 0;
       }
-    </style>
+      /* Responsive: bei Portrait oder schmalen Screens Sidebar nach unten */
+      @media (orientation: portrait), (max-width: 900px) {
+        .wrap {
+          grid-template-columns: 1fr;
+        }
+
+        /* Optional: etwas kompakter auf Mobile */
+        body {
+          margin: 16px;
+        }
+
+        #svgHost svg {
+          max-width: 100%;
+        }
+      }
+      </style>
   </head>
 
   <body>
