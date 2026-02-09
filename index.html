@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang='de-CH'>
+  <head>
+    <meta charset='utf-8' />
+    <meta name='viewport' content='width=device-width, initial-scale=1' />
+    <title>BSG Reinach Logo – Farbvarianten</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        margin: 24px;
+      }
+      .wrap {
+        display: grid;
+        grid-template-columns: 1fr 360px;
+        gap: 24px;
+        align-items: start;
+        max-width: 1200px;
+      }
+      .card {
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 16px;
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0 0 10px 0;
+      }
+      h2 {
+        font-size: 14px;
+        margin: 16px 0 8px 0;
+      }
+      .muted {
+        color: #6b7280;
+        font-size: 13px;
+        line-height: 1.35;
+      }
+      #svgHost svg {
+        width: 100%;
+        max-width: 760px;
+        height: auto;
+        display: block;
+      }
+      .controls label {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+        align-items: center;
+        margin: 10px 0;
+      }
+      .presets {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        margin: 8px 0 0 0;
+      }
+      button {
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid #d1d5db;
+        background: white;
+        cursor: pointer;
+        text-align: left;
+      }
+      button:hover { background: #f9fafb; }
+      .download {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .error {
+        color: #991b1b;
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        padding: 10px 12px;
+        border-radius: 10px;
+        margin-top: 12px;
+        font-size: 13px;
+        line-height: 1.35;
+      }
+      .divider {
+        height: 1px;
+        background: #e5e7eb;
+        margin: 14px 0;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class='wrap'>
+      <div class='card'>
+        <h1>Logo-Farbvarianten</h1>
+        <div class='muted'>
+          Dieses Tool lässt Sie eine Farbvariante auswählen oder die Hauptfarben des Logos manuell anpassen.
+          <div class='divider'></div>
+        </div>
+
+        <div id='svgHost' style='margin-top: 14px;'></div>
+        <div id='errorBox' style='display:none;'></div>
+      </div>
+
+      <div class='card controls'>
+        <h2>Farb-Auswahl</h2>
+        <label>Hell <input id='colorBright' type='color' value='#F7C51D' /></label>
+        <label>Dunkel <input id='colorDark' type='color' value='#25386C' /></label>
+        <label>Akzent <input id='colorHighlight' type='color' value='#EC2027' /></label>
+
+        <h2>Farbvarianten (Voreinstellungen)</h2>
+        <div class='presets' id='presets'></div>
+
+        <h2>Download</h2>
+        <div class='muted' id='downloadHint'></div>
+        <div class='download'>
+          <button id='downloadPng' type='button'>Bild herunterladen</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Diese Farben muessen den 3 Originalfarben im logo.svg entsprechen.
+      const ORIGINAL = {
+        bright: '#F7C51D',
+        dark: '#25386C',
+        highlight: '#EC2027',
+      };
+
+      // Automatische PNG-Groesse:
+      // Die lange Kante (Breite oder Hoehe) wird auf diesen Wert skaliert.
+      const TARGET_LONG_EDGE_PX = 1000;
+
+      const svgHost = document.getElementById('svgHost');
+      const presetsEl = document.getElementById('presets');
+      const errorBox = document.getElementById('errorBox');
+      const downloadHint = document.getElementById('downloadHint');
+
+      const inputBright = document.getElementById('colorBright');
+      const inputDark = document.getElementById('colorDark');
+      const inputHighlight = document.getElementById('colorHighlight');
+
+      /** @type {SVGElement|null} */
+      let svgEl = null;
+
+      /** @type {string} */
+      let originalSvgText = '';
+
+      /** @type {{width: number, height: number}} */
+      let exportSize = { width: TARGET_LONG_EDGE_PX, height: TARGET_LONG_EDGE_PX };
+
+      /**
+       * @param {string} hex
+       * @return {string}
+       */
+      function normalizeHex(hex) {
+        if (!hex) return '';
+        const v = hex.trim().toLowerCase();
+        if (!v.startsWith('#')) return v;
+        if (v.length === 4) {
+          return `#${v[1]}${v[1]}${v[2]}${v[2]}${v[3]}${v[3]}`;
+        }
+        return v;
+      }
+
+      /**
+       * Converts a CSS/SVG length to pixels (best effort).
+       * Supports px, mm, cm, in, pt, pc. If unitless, assumes px.
+       * @param {string} value
+       * @return {number}
+       */
+      function lengthToPx(value) {
+        if (!value) return 0;
+        const v = value.trim().toLowerCase();
+        const m = v.match(/^([0-9]*\.?[0-9]+)\s*(px|mm|cm|in|pt|pc)?$/);
+        if (!m) return 0;
+        const num = Number(m[1]);
+        const unit = m[2] || 'px';
+
+        // CSS standard: 1in = 96px
+        if (unit === 'px') return num;
+        if (unit === 'in') return num * 96;
+        if (unit === 'cm') return (num / 2.54) * 96;
+        if (unit === 'mm') return (num / 25.4) * 96;
+        if (unit === 'pt') return (num / 72) * 96;
+        if (unit === 'pc') return (num * 12 / 72) * 96;
+        return 0;
+      }
+
+      /**
+       * Basic CSV line parser supporting quoted fields.
+       * @param {string} line
+       * @param {string} delimiter
+       * @return {!Array<string>}
+       */
+      function parseCsvLine(line, delimiter) {
+        const out = [];
+        let cur = '';
+        let inQuotes = false;
+
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (ch === '"') {
+            if (inQuotes && line[i + 1] === '"') {
+              cur += '"';
+              i++;
+            } else {
+              inQuotes = !inQuotes;
+            }
+          } else if (ch === delimiter && !inQuotes) {
+            out.push(cur.trim());
+            cur = '';
+          } else {
+            cur += ch;
+          }
+        }
+        out.push(cur.trim());
+        return out;
+      }
+
+      /**
+       * Parses CSV (auto-detects ';' vs ',').
+       * @param {string} csvText
+       * @return {!Array<!Object<string, string>>}
+       */
+      function parseCsv(csvText) {
+        const lines = csvText
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter((l) => l.length > 0);
+
+        if (lines.length < 2) return [];
+
+        const delimiter = lines[0].includes(';') ? ';' : ',';
+        const headers = parseCsvLine(lines[0], delimiter).map((h) => h.trim());
+        const rows = [];
+
+        for (let i = 1; i < lines.length; i++) {
+          const fields = parseCsvLine(lines[i], delimiter);
+          const row = {};
+          for (let j = 0; j < headers.length; j++) {
+            row[headers[j]] = (fields[j] || '').trim();
+          }
+          rows.push(row);
+        }
+        return rows;
+      }
+
+      /**
+       * Recolors SVG elements by matching fill/stroke/stop-color equal to one of ORIGINAL colors.
+       * @param {!SVGElement} svg
+       * @param {{bright: string, dark: string, highlight: string}} target
+       */
+      function recolorSvg(svg, target) {
+        const map = new Map([
+          [normalizeHex(ORIGINAL.bright), normalizeHex(target.bright)],
+          [normalizeHex(ORIGINAL.dark), normalizeHex(target.dark)],
+          [normalizeHex(ORIGINAL.highlight), normalizeHex(target.highlight)],
+        ]);
+
+        const all = svg.querySelectorAll('*');
+        for (const el of all) {
+          for (const attr of ['fill', 'stroke', 'stop-color']) {
+            const val = el.getAttribute(attr);
+            if (!val) continue;
+
+            const n = normalizeHex(val);
+            if (map.has(n)) el.setAttribute(attr, map.get(n));
+          }
+
+          const style = el.getAttribute('style');
+          if (style) {
+            let updated = style;
+            for (const [from, to] of map.entries()) {
+              updated = updated.replaceAll(from, to);
+            }
+            if (updated !== style) el.setAttribute('style', updated);
+          }
+        }
+      }
+
+      /**
+       * @return {{bright: string, dark: string, highlight: string}}
+       */
+      function getCurrentColors() {
+        return {
+          bright: inputBright.value,
+          dark: inputDark.value,
+          highlight: inputHighlight.value,
+        };
+      }
+
+      /**
+       * Apply colors by re-injecting a clean SVG, then recoloring.
+       * @param {{bright: string, dark: string, highlight: string}} colors
+       */
+      function applyColors(colors) {
+        inputBright.value = colors.bright;
+        inputDark.value = colors.dark;
+        inputHighlight.value = colors.highlight;
+
+        if (!originalSvgText) return;
+
+        svgHost.innerHTML = originalSvgText;
+        svgEl = svgHost.querySelector('svg');
+        if (!svgEl) return;
+
+        recolorSvg(svgEl, colors);
+      }
+
+      /**
+       * Computes export size from SVG (width/height preferred, else viewBox), scaled to TARGET_LONG_EDGE_PX.
+       * @param {!SVGElement} svg
+       * @return {{width: number, height: number}}
+       */
+      function computeExportSize(svg) {
+        const wAttr = svg.getAttribute('width') || '';
+        const hAttr = svg.getAttribute('height') || '';
+        const wPx = lengthToPx(wAttr);
+        const hPx = lengthToPx(hAttr);
+
+        let baseW = 0;
+        let baseH = 0;
+
+        if (wPx > 0 && hPx > 0) {
+          baseW = wPx;
+          baseH = hPx;
+        } else {
+          const vb = svg.viewBox && svg.viewBox.baseVal ? svg.viewBox.baseVal : null;
+          if (vb && vb.width > 0 && vb.height > 0) {
+            baseW = vb.width;
+            baseH = vb.height;
+          } else {
+            // Fallback, should rarely happen.
+            baseW = 1000;
+            baseH = 500;
+          }
+        }
+
+        const longEdge = Math.max(baseW, baseH);
+        const scale = Math.max(1, TARGET_LONG_EDGE_PX / longEdge);
+
+        return {
+          width: Math.max(1, Math.round(baseW * scale)),
+          height: Math.max(1, Math.round(baseH * scale)),
+        };
+      }
+
+      /**
+       * @param {!SVGElement} svg
+       * @return {string}
+       */
+      function serializeSvg(svg) {
+        const clone = svg.cloneNode(true);
+        if (!clone.getAttribute('xmlns')) {
+          clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        }
+        if (!clone.getAttribute('xmlns:xlink')) {
+          clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+        }
+        const serializer = new XMLSerializer();
+        return `<?xml version='1.0' encoding='UTF-8'?>\n${serializer.serializeToString(clone)}`;
+      }
+
+      /**
+       * @param {!Blob} blob
+       * @param {string} filename
+       */
+      function downloadBlob(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      }
+
+      /**
+       * Converts SVG to PNG via canvas, with white background.
+       * @param {string} svgText
+       * @param {number} width
+       * @param {number} height
+       * @return {!Promise<!Blob>}
+       */
+      function svgTextToPngBlob(svgText, width, height) {
+        return new Promise((resolve, reject) => {
+          const svgBlob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+          const url = URL.createObjectURL(svgBlob);
+
+          const img = new Image();
+          img.decoding = 'async';
+
+          img.onload = () => {
+            try {
+              const canvas = document.createElement('canvas');
+              canvas.width = width;
+              canvas.height = height;
+
+              const ctx = canvas.getContext('2d');
+
+              // Weisser Hintergrund.
+              ctx.fillStyle = '#ffffff';
+              ctx.fillRect(0, 0, width, height);
+
+              // Dann SVG zeichnen.
+              ctx.drawImage(img, 0, 0, width, height);
+
+              canvas.toBlob((blob) => {
+                URL.revokeObjectURL(url);
+                if (!blob) {
+                  reject(new Error('PNG konnte nicht erstellt werden.'));
+                  return;
+                }
+                resolve(blob);
+              }, 'image/png');
+            } catch (err) {
+              URL.revokeObjectURL(url);
+              reject(err);
+            }
+          };
+
+          img.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error('SVG konnte nicht in ein Bild geladen werden.'));
+          };
+
+          img.src = url;
+        });
+      }
+
+      /**
+       * @return {!Promise<void>}
+       */
+      async function loadLogo() {
+        const res = await fetch('./logo.svg', { cache: 'no-store' });
+        if (!res.ok) throw new Error(`logo.svg konnte nicht geladen werden (HTTP ${res.status}).`);
+        originalSvgText = await res.text();
+
+        svgHost.innerHTML = originalSvgText;
+        svgEl = svgHost.querySelector('svg');
+        if (!svgEl) throw new Error('logo.svg enthaelt kein <svg>-Root-Element.');
+
+        exportSize = computeExportSize(svgEl);
+        downloadHint.textContent =
+          `Hier kann das Logo mit eingestellten Farben heruntergeladen werden (${exportSize.width} × ${exportSize.height} px, weisser Hintergrund).`;
+
+        applyColors(getCurrentColors());
+      }
+
+      /**
+       * @return {!Promise<!Array<!Object<string, string>>>}
+       */
+      async function loadPalettes() {
+        const res = await fetch('./palettes.csv', { cache: 'no-store' });
+        if (!res.ok) throw new Error(`palettes.csv konnte nicht geladen werden (HTTP ${res.status}).`);
+        const csvText = await res.text();
+        return parseCsv(csvText);
+      }
+
+      /**
+       * @param {!Array<!Object<string, string>>} rows
+       */
+      function renderPaletteButtons(rows) {
+        presetsEl.innerHTML = '';
+
+        for (const row of rows) {
+          const variant = (row.variant || '').trim();
+          const name = (row.name || '').trim();
+          const bright = (row.bright || '').trim();
+          const dark = (row.dark || '').trim();
+          const highlight = (row.highlight || '').trim();
+
+          if (!bright || !dark || !highlight) continue;
+
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.textContent = variant ? `${variant}  ${name}` : name;
+
+          btn.addEventListener('click', () => {
+            applyColors({ bright, dark, highlight });
+          });
+
+          presetsEl.appendChild(btn);
+        }
+      }
+
+      function showError(message) {
+        errorBox.style.display = 'block';
+        errorBox.className = 'error';
+        errorBox.textContent = message;
+      }
+
+      document.addEventListener('input', (e) => {
+        if (e.target !== inputBright && e.target !== inputDark && e.target !== inputHighlight) return;
+        applyColors(getCurrentColors());
+      });
+
+      document.getElementById('downloadPng').addEventListener('click', async () => {
+        if (!svgEl) return;
+
+        try {
+          const svgText = serializeSvg(svgEl);
+          const blob = await svgTextToPngBlob(svgText, exportSize.width, exportSize.height);
+          downloadBlob(blob, `bsg-reinach-logo-${exportSize.width}x${exportSize.height}.png`);
+        } catch (err) {
+          showError(String(err));
+        }
+      });
+
+      async function init() {
+        try {
+          const [rows] = await Promise.all([
+            loadPalettes(),
+            loadLogo(),
+          ]);
+
+          renderPaletteButtons(rows);
+
+          if (rows.length > 0) {
+            const first = rows[0];
+            if (first.bright && first.dark && first.highlight) {
+              applyColors({
+                bright: first.bright.trim(),
+                dark: first.dark.trim(),
+                highlight: first.highlight.trim(),
+              });
+            }
+          }
+        } catch (err) {
+          showError(String(err));
+        }
+      }
+
+      init();
+    </script>
+  </body>
+</html>
