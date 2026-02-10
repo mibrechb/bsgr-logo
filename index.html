@@ -83,22 +83,31 @@
         background: #e5e7eb;
         margin: 14px 0;
       }
+
+      /* Toggle (Segmented Control) */
+      .toggle {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin: 8px 0 0 0;
+      }
+      .toggle button {
+        text-align: center;
+        font-weight: 600;
+      }
+      .toggle button[aria-pressed='true'] {
+        border-color: #111827;
+        background: #111827;
+        color: #ffffff;
+      }
+
       /* Responsive: bei Portrait oder schmalen Screens Sidebar nach unten */
       @media (orientation: portrait), (max-width: 900px) {
-        .wrap {
-          grid-template-columns: 1fr;
-        }
-
-        /* Optional: etwas kompakter auf Mobile */
-        body {
-          margin: 16px;
-        }
-
-        #svgHost svg {
-          max-width: 100%;
-        }
+        .wrap { grid-template-columns: 1fr; }
+        body { margin: 16px; }
+        #svgHost svg { max-width: 100%; }
       }
-      </style>
+    </style>
   </head>
 
   <body>
@@ -115,7 +124,21 @@
       </div>
 
       <div class='card controls'>
+        <h2>Logo-Auswahl</h2>
+        <div class='toggle' id='logoVariantToggle' role='group' aria-label='Logo-Auswahl'>
+          <button id='btnLogoA' type='button' aria-pressed='true'>Variante A</button>
+          <button id='btnLogoB' type='button' aria-pressed='false'>Variante B</button>
+        </div>
+
         <h2>Farb-Auswahl</h2>
+        <div class='muted'>
+          Positiv = für hellen Hintergrund, Negativ = für dunklen Hintergrund.
+        </div>
+        <div class='toggle' id='polarityToggle' role='group' aria-label='Positiv oder Negativ'>
+          <button id='btnPos' type='button' aria-pressed='true'>Positiv</button>
+          <button id='btnNeg' type='button' aria-pressed='false'>Negativ</button>
+        </div>
+
         <label>Hell <input id='colorBright' type='color' value='#F7C51D' /></label>
         <label>Dunkel <input id='colorDark' type='color' value='#25386C' /></label>
         <label>Akzent <input id='colorHighlight' type='color' value='#EC2027' /></label>
@@ -132,16 +155,41 @@
     </div>
 
     <script>
-      // Diese Farben muessen den 3 Originalfarben im logo.svg entsprechen.
-      const ORIGINAL = {
-        bright: '#F7C51D',
-        dark: '#25386C',
-        highlight: '#EC2027',
+      // Diese "Originalfarben" müssen den Farben entsprechen, die im jeweiligen SVG tatsächlich vorkommen,
+      // damit das Ersetzen (Recolor) funktioniert.
+      const ORIGINAL_BY_POLARITY = {
+        pos: {
+          bright: '#F7C51D',
+          dark: '#24376c',
+          highlight: '#EC2027',
+        },
+        neg: {
+          bright: '#CCEBF6',
+          dark: '#539ECC',
+          highlight: '#ED1C24',
+        },
+      };
+
+      // Startwerte für die Picker je Modus (kann der User danach frei anpassen).
+      const DEFAULT_COLORS_BY_POLARITY = {
+        pos: {
+          bright: '#F7C51D',
+          dark: '#24376c',
+          highlight: '#EC2027',
+        },
+        neg: {
+          bright: '#9ED2EE',
+          dark: '#1073AF',
+          highlight: '#ED1C24',
+        },
       };
 
       // Automatische PNG-Groesse:
       // Die lange Kante (Breite oder Hoehe) wird auf diesen Wert skaliert.
       const TARGET_LONG_EDGE_PX = 1000;
+
+      // PNG Hintergrund: immer weiss (wie gewünscht).
+      const PNG_BACKGROUND = '#ffffff';
 
       const svgHost = document.getElementById('svgHost');
       const presetsEl = document.getElementById('presets');
@@ -152,6 +200,11 @@
       const inputDark = document.getElementById('colorDark');
       const inputHighlight = document.getElementById('colorHighlight');
 
+      const btnLogoA = document.getElementById('btnLogoA');
+      const btnLogoB = document.getElementById('btnLogoB');
+      const btnPos = document.getElementById('btnPos');
+      const btnNeg = document.getElementById('btnNeg');
+
       /** @type {SVGElement|null} */
       let svgEl = null;
 
@@ -160,6 +213,52 @@
 
       /** @type {{width: number, height: number}} */
       let exportSize = { width: TARGET_LONG_EDGE_PX, height: TARGET_LONG_EDGE_PX };
+
+      /** @type {{variant: 'a'|'b', polarity: 'pos'|'neg'}} */
+      const selection = { variant: 'a', polarity: 'pos' };
+
+      // Merkt sich die zuletzt verwendeten Farben pro Modus (damit Pos/Neg unabhängig bleiben).
+      /** @type {{pos: {bright: string, dark: string, highlight: string}, neg: {bright: string, dark: string, highlight: string}}} */
+      const colorsByPolarity = {
+        pos: {
+          bright: inputBright.value,
+          dark: inputDark.value,
+          highlight: inputHighlight.value,
+        },
+        neg: {
+          bright: DEFAULT_COLORS_BY_POLARITY.neg.bright,
+          dark: DEFAULT_COLORS_BY_POLARITY.neg.dark,
+          highlight: DEFAULT_COLORS_BY_POLARITY.neg.highlight,
+        },
+      };
+
+      let loadToken = 0;
+
+      function setPressed(el, pressed) {
+        el.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+      }
+
+      function clearError() {
+        errorBox.style.display = 'none';
+        errorBox.className = '';
+        errorBox.textContent = '';
+      }
+
+      function showError(message) {
+        errorBox.style.display = 'block';
+        errorBox.className = 'error';
+        errorBox.textContent = message;
+      }
+
+      function getLogoFilename() {
+        // Erwartete Dateien:
+        // logo_a_pos.svg, logo_a_neg.svg, logo_b_pos.svg, logo_b_neg.svg
+        return `./logo_${selection.variant}_${selection.polarity}.svg`;
+      }
+
+      function getOriginalColors() {
+        return ORIGINAL_BY_POLARITY[selection.polarity];
+      }
 
       /**
        * @param {string} hex
@@ -189,7 +288,6 @@
         const num = Number(m[1]);
         const unit = m[2] || 'px';
 
-        // CSS standard: 1in = 96px
         if (unit === 'px') return num;
         if (unit === 'in') return num * 96;
         if (unit === 'cm') return (num / 2.54) * 96;
@@ -259,15 +357,16 @@
       }
 
       /**
-       * Recolors SVG elements by matching fill/stroke/stop-color equal to one of ORIGINAL colors.
+       * Recolors SVG elements by matching fill/stroke/stop-color equal to one of original colors.
        * @param {!SVGElement} svg
        * @param {{bright: string, dark: string, highlight: string}} target
        */
       function recolorSvg(svg, target) {
+        const original = getOriginalColors();
         const map = new Map([
-          [normalizeHex(ORIGINAL.bright), normalizeHex(target.bright)],
-          [normalizeHex(ORIGINAL.dark), normalizeHex(target.dark)],
-          [normalizeHex(ORIGINAL.highlight), normalizeHex(target.highlight)],
+          [normalizeHex(original.bright), normalizeHex(target.bright)],
+          [normalizeHex(original.dark), normalizeHex(target.dark)],
+          [normalizeHex(original.highlight), normalizeHex(target.highlight)],
         ]);
 
         const all = svg.querySelectorAll('*');
@@ -291,9 +390,6 @@
         }
       }
 
-      /**
-       * @return {{bright: string, dark: string, highlight: string}}
-       */
       function getCurrentColors() {
         return {
           bright: inputBright.value,
@@ -304,6 +400,7 @@
 
       /**
        * Apply colors by re-injecting a clean SVG, then recoloring.
+       * Also stores the colors for the current polarity.
        * @param {{bright: string, dark: string, highlight: string}} colors
        */
       function applyColors(colors) {
@@ -311,13 +408,19 @@
         inputDark.value = colors.dark;
         inputHighlight.value = colors.highlight;
 
+        colorsByPolarity[selection.polarity] = {
+          bright: colors.bright,
+          dark: colors.dark,
+          highlight: colors.highlight,
+        };
+
         if (!originalSvgText) return;
 
         svgHost.innerHTML = originalSvgText;
         svgEl = svgHost.querySelector('svg');
         if (!svgEl) return;
 
-        recolorSvg(svgEl, colors);
+        recolorSvg(svgEl, colorsByPolarity[selection.polarity]);
       }
 
       /**
@@ -343,7 +446,6 @@
             baseW = vb.width;
             baseH = vb.height;
           } else {
-            // Fallback, should rarely happen.
             baseW = 1000;
             baseH = 500;
           }
@@ -358,10 +460,6 @@
         };
       }
 
-      /**
-       * @param {!SVGElement} svg
-       * @return {string}
-       */
       function serializeSvg(svg) {
         const clone = svg.cloneNode(true);
         if (!clone.getAttribute('xmlns')) {
@@ -374,10 +472,6 @@
         return `<?xml version='1.0' encoding='UTF-8'?>\n${serializer.serializeToString(clone)}`;
       }
 
-      /**
-       * @param {!Blob} blob
-       * @param {string} filename
-       */
       function downloadBlob(blob, filename) {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -389,13 +483,6 @@
         setTimeout(() => URL.revokeObjectURL(url), 2000);
       }
 
-      /**
-       * Converts SVG to PNG via canvas, with white background.
-       * @param {string} svgText
-       * @param {number} width
-       * @param {number} height
-       * @return {!Promise<!Blob>}
-       */
       function svgTextToPngBlob(svgText, width, height) {
         return new Promise((resolve, reject) => {
           const svgBlob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
@@ -413,10 +500,9 @@
               const ctx = canvas.getContext('2d');
 
               // Weisser Hintergrund.
-              ctx.fillStyle = '#ffffff';
+              ctx.fillStyle = PNG_BACKGROUND;
               ctx.fillRect(0, 0, width, height);
 
-              // Dann SVG zeichnen.
               ctx.drawImage(img, 0, 0, width, height);
 
               canvas.toBlob((blob) => {
@@ -442,28 +528,32 @@
         });
       }
 
-      /**
-       * @return {!Promise<void>}
-       */
-      async function loadLogo() {
-        const res = await fetch('./logo.svg', { cache: 'no-store' });
-        if (!res.ok) throw new Error(`logo.svg konnte nicht geladen werden (HTTP ${res.status}).`);
-        originalSvgText = await res.text();
+      async function loadLogoForSelection() {
+        const token = ++loadToken;
+        clearError();
 
+        const filename = getLogoFilename();
+        const res = await fetch(filename, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`${filename} konnte nicht geladen werden (HTTP ${res.status}).`);
+        const text = await res.text();
+
+        if (token !== loadToken) return;
+
+        originalSvgText = text;
         svgHost.innerHTML = originalSvgText;
         svgEl = svgHost.querySelector('svg');
-        if (!svgEl) throw new Error('logo.svg enthaelt kein <svg>-Root-Element.');
+        if (!svgEl) throw new Error(`${filename} enthaelt kein <svg>-Root-Element.`);
 
         exportSize = computeExportSize(svgEl);
+
         downloadHint.textContent =
           `Hier kann das Logo mit eingestellten Farben heruntergeladen werden (${exportSize.width} × ${exportSize.height} px, weisser Hintergrund).`;
 
-        applyColors(getCurrentColors());
+        // Wichtig: nach dem Laden die gespeicherten Farben des aktuellen Modus anwenden.
+        const colors = colorsByPolarity[selection.polarity] || DEFAULT_COLORS_BY_POLARITY[selection.polarity];
+        applyColors(colors);
       }
 
-      /**
-       * @return {!Promise<!Array<!Object<string, string>>>}
-       */
       async function loadPalettes() {
         const res = await fetch('./palettes.csv', { cache: 'no-store' });
         if (!res.ok) throw new Error(`palettes.csv konnte nicht geladen werden (HTTP ${res.status}).`);
@@ -471,9 +561,6 @@
         return parseCsv(csvText);
       }
 
-      /**
-       * @param {!Array<!Object<string, string>>} rows
-       */
       function renderPaletteButtons(rows) {
         presetsEl.innerHTML = '';
 
@@ -491,6 +578,7 @@
           btn.textContent = variant ? `${variant}  ${name}` : name;
 
           btn.addEventListener('click', () => {
+            // Presets sollen immer die aktuellen (Pos/Neg) Zielwerte setzen.
             applyColors({ bright, dark, highlight });
           });
 
@@ -498,12 +586,56 @@
         }
       }
 
-      function showError(message) {
-        errorBox.style.display = 'block';
-        errorBox.className = 'error';
-        errorBox.textContent = message;
-      }
+      // Toggle Events
+      btnLogoA.addEventListener('click', async () => {
+        selection.variant = 'a';
+        setPressed(btnLogoA, true);
+        setPressed(btnLogoB, false);
+        try { await loadLogoForSelection(); } catch (err) { showError(String(err)); }
+      });
 
+      btnLogoB.addEventListener('click', async () => {
+        selection.variant = 'b';
+        setPressed(btnLogoA, false);
+        setPressed(btnLogoB, true);
+        try { await loadLogoForSelection(); } catch (err) { showError(String(err)); }
+      });
+
+      btnPos.addEventListener('click', async () => {
+        if (selection.polarity === 'pos') return;
+
+        // Aktuelle Negativ-Farben speichern
+        colorsByPolarity.neg = getCurrentColors();
+
+        selection.polarity = 'pos';
+        setPressed(btnPos, true);
+        setPressed(btnNeg, false);
+
+        // Positiv-Farben wiederherstellen
+        const colors = colorsByPolarity.pos || DEFAULT_COLORS_BY_POLARITY.pos;
+        applyColors(colors);
+
+        try { await loadLogoForSelection(); } catch (err) { showError(String(err)); }
+      });
+
+      btnNeg.addEventListener('click', async () => {
+        if (selection.polarity === 'neg') return;
+
+        // Aktuelle Positiv-Farben speichern
+        colorsByPolarity.pos = getCurrentColors();
+
+        selection.polarity = 'neg';
+        setPressed(btnPos, false);
+        setPressed(btnNeg, true);
+
+        // Negativ-Farben setzen (oder Defaults beim ersten Mal)
+        const colors = colorsByPolarity.neg || DEFAULT_COLORS_BY_POLARITY.neg;
+        applyColors(colors);
+
+        try { await loadLogoForSelection(); } catch (err) { showError(String(err)); }
+      });
+
+      // Picker changes.
       document.addEventListener('input', (e) => {
         if (e.target !== inputBright && e.target !== inputDark && e.target !== inputHighlight) return;
         applyColors(getCurrentColors());
@@ -515,7 +647,10 @@
         try {
           const svgText = serializeSvg(svgEl);
           const blob = await svgTextToPngBlob(svgText, exportSize.width, exportSize.height);
-          downloadBlob(blob, `bsg-reinach-logo-${exportSize.width}x${exportSize.height}.png`);
+
+          const variantLabel = selection.variant.toUpperCase();
+          const polLabel = selection.polarity;
+          downloadBlob(blob, `bsg-reinach-logo-${variantLabel}-${polLabel}-${exportSize.width}x${exportSize.height}.png`);
         } catch (err) {
           showError(String(err));
         }
@@ -523,23 +658,23 @@
 
       async function init() {
         try {
-          const [rows] = await Promise.all([
-            loadPalettes(),
-            loadLogo(),
-          ]);
-
+          const rows = await loadPalettes();
           renderPaletteButtons(rows);
 
+          // Optional: erste Palette direkt anwenden (auf Positiv-Start).
           if (rows.length > 0) {
             const first = rows[0];
             if (first.bright && first.dark && first.highlight) {
-              applyColors({
+              colorsByPolarity.pos = {
                 bright: first.bright.trim(),
                 dark: first.dark.trim(),
                 highlight: first.highlight.trim(),
-              });
+              };
+              applyColors(colorsByPolarity.pos);
             }
           }
+
+          await loadLogoForSelection();
         } catch (err) {
           showError(String(err));
         }
