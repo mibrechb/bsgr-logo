@@ -547,7 +547,7 @@
         exportSize = computeExportSize(svgEl);
 
         downloadHint.textContent =
-          `Hier kann das Logo mit eingestellten Farben heruntergeladen werden (${exportSize.width} × ${exportSize.height} px, weisser Hintergrund).`;
+          `Hier kann das Logo mit eingestellten Farben heruntergeladen werden (${exportSize.width} × ${exportSize.height} px).`;
 
         // Wichtig: nach dem Laden die gespeicherten Farben des aktuellen Modus anwenden.
         const colors = colorsByPolarity[selection.polarity] || DEFAULT_COLORS_BY_POLARITY[selection.polarity];
